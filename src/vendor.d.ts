@@ -4,3 +4,10 @@ declare module "qrcode-terminal" {
   };
   export default qrcode;
 }
+
+declare module "silk-wasm" {
+  export function decode(
+    input: Uint8Array | Buffer,
+    sampleRate: number,
+  ): Promise<{ data: Uint8Array; duration: number }>;
+}

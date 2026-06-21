@@ -12,6 +12,7 @@ import {
   type WeixinFetch,
 } from "./types.js";
 import type { WeixinProtocolClient } from "./protocol.js";
+import { silkToWav } from "./silk.js";
 
 export function aesEcbPaddedSize(plaintextSize: number): number {
   return Math.ceil((plaintextSize + 1) / 16) * 16;
@@ -25,6 +26,30 @@ export function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
 export function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
   const decipher = createDecipheriv("aes-128-ecb", key, null);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+/**
+ * Parse CDNMedia.aes_key into a raw 16-byte AES key.
+ *
+ * Two encodings appear on the wire (see @tencent-weixin/openclaw-weixin):
+ *   - base64(raw 16 bytes)           → images (aes_key from media field)
+ *   - base64(32-char hex string)     → file / voice / video
+ *
+ * In the second case, base64-decoding yields 32 ASCII hex chars which must
+ * then be parsed as hex to recover the actual 16-byte key.
+ */
+export function parseAesKey(aesKeyBase64: string): Buffer {
+  const decoded = Buffer.from(aesKeyBase64, "base64");
+  if (decoded.length === 16) {
+    return decoded;
+  }
+  if (decoded.length === 32 && /^[0-9a-fA-F]{32}$/.test(decoded.toString("ascii"))) {
+    return Buffer.from(decoded.toString("ascii"), "hex");
+  }
+  throw new ValidationError(
+    "weixin",
+    `aes_key must decode to 16 raw bytes or a 32-char hex string, got ${decoded.length} bytes`,
+  );
 }
 
 export async function fileUploadToBuffer(file: FileUpload): Promise<Buffer> {
@@ -197,6 +222,11 @@ export function attachmentFromMessageItem(params: {
   cdnBaseUrl: string;
   fetchFn?: WeixinFetch;
 }): Attachment | null {
+  // Prefer the server-side transcription when present: skip the audio download
+  // entirely (mirrors @tencent-weixin/openclaw-weixin's `!voice_item.text` gate).
+  if (params.item.type === MessageItemType.VOICE && params.item.voice_item?.text) {
+    return null;
+  }
   const media = getMedia(params.item);
   if (!media?.encrypt_query_param) return null;
   const key = getAesKey(params.item, media);
@@ -245,9 +275,16 @@ export function attachmentFromMessageItem(params: {
     return {
       ...base,
       type: "audio",
-      mimeType: "audio/silk",
-      name: "voice.silk",
+      mimeType: "audio/wav",
+      name: "voice.wav",
       size: undefined,
+      // Decrypt to SILK, then transcode to WAV via silk-wasm. If silk-wasm is
+      // unavailable (optional dep) or decoding fails, fall back to raw SILK.
+      fetchData: async () => {
+        const silk = await base.fetchData!();
+        const wav = await silkToWav(silk);
+        return wav ?? silk;
+      },
     };
   }
   if (params.item.type === MessageItemType.FILE) {
@@ -276,5 +313,5 @@ function getAesKey(item: MessageItem, media: CDNMedia): Buffer | undefined {
   const hex = item.image_item?.aeskey;
   if (hex && /^[a-f0-9]{32}$/i.test(hex)) return Buffer.from(hex, "hex");
   if (!media.aes_key) return undefined;
-  return Buffer.from(media.aes_key, "base64");
+  return parseAesKey(media.aes_key);
 }

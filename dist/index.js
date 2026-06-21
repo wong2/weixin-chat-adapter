@@ -110,6 +110,54 @@ function markdownToPlainText(text) {
 // src/media.ts
 import crypto, { createCipheriv, createDecipheriv } from "crypto";
 import { ValidationError } from "@chat-adapter/shared";
+
+// src/silk.ts
+var SILK_SAMPLE_RATE = 24e3;
+function pcmBytesToWav(pcm, sampleRate) {
+  const pcmBytes = pcm.byteLength;
+  const totalSize = 44 + pcmBytes;
+  const buf = Buffer.allocUnsafe(totalSize);
+  let offset = 0;
+  buf.write("RIFF", offset);
+  offset += 4;
+  buf.writeUInt32LE(totalSize - 8, offset);
+  offset += 4;
+  buf.write("WAVE", offset);
+  offset += 4;
+  buf.write("fmt ", offset);
+  offset += 4;
+  buf.writeUInt32LE(16, offset);
+  offset += 4;
+  buf.writeUInt16LE(1, offset);
+  offset += 2;
+  buf.writeUInt16LE(1, offset);
+  offset += 2;
+  buf.writeUInt32LE(sampleRate, offset);
+  offset += 4;
+  buf.writeUInt32LE(sampleRate * 2, offset);
+  offset += 4;
+  buf.writeUInt16LE(2, offset);
+  offset += 2;
+  buf.writeUInt16LE(16, offset);
+  offset += 2;
+  buf.write("data", offset);
+  offset += 4;
+  buf.writeUInt32LE(pcmBytes, offset);
+  offset += 4;
+  Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).copy(buf, offset);
+  return buf;
+}
+async function silkToWav(silkBuf) {
+  try {
+    const { decode } = await import("silk-wasm");
+    const result = await decode(silkBuf, SILK_SAMPLE_RATE);
+    return pcmBytesToWav(result.data, SILK_SAMPLE_RATE);
+  } catch {
+    return null;
+  }
+}
+
+// src/media.ts
 function encryptAesEcb(plaintext, key) {
   const cipher = createCipheriv("aes-128-ecb", key, null);
   return Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -117,6 +165,19 @@ function encryptAesEcb(plaintext, key) {
 function decryptAesEcb(ciphertext, key) {
   const decipher = createDecipheriv("aes-128-ecb", key, null);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+function parseAesKey(aesKeyBase64) {
+  const decoded = Buffer.from(aesKeyBase64, "base64");
+  if (decoded.length === 16) {
+    return decoded;
+  }
+  if (decoded.length === 32 && /^[0-9a-fA-F]{32}$/.test(decoded.toString("ascii"))) {
+    return Buffer.from(decoded.toString("ascii"), "hex");
+  }
+  throw new ValidationError(
+    "weixin",
+    `aes_key must decode to 16 raw bytes or a 32-char hex string, got ${decoded.length} bytes`
+  );
 }
 async function fileUploadToBuffer(file) {
   if (Buffer.isBuffer(file.data)) return file.data;
@@ -245,6 +306,9 @@ function inferUploadKind(mimeType, type) {
   return { kind: "file", mediaType: UploadMediaType.FILE };
 }
 function attachmentFromMessageItem(params) {
+  if (params.item.type === MessageItemType.VOICE && params.item.voice_item?.text) {
+    return null;
+  }
   const media = getMedia(params.item);
   if (!media?.encrypt_query_param) return null;
   const key = getAesKey(params.item, media);
@@ -292,9 +356,16 @@ function attachmentFromMessageItem(params) {
     return {
       ...base,
       type: "audio",
-      mimeType: "audio/silk",
-      name: "voice.silk",
-      size: void 0
+      mimeType: "audio/wav",
+      name: "voice.wav",
+      size: void 0,
+      // Decrypt to SILK, then transcode to WAV via silk-wasm. If silk-wasm is
+      // unavailable (optional dep) or decoding fails, fall back to raw SILK.
+      fetchData: async () => {
+        const silk = await base.fetchData();
+        const wav = await silkToWav(silk);
+        return wav ?? silk;
+      }
     };
   }
   if (params.item.type === MessageItemType.FILE) {
@@ -316,7 +387,7 @@ function getAesKey(item, media) {
   const hex = item.image_item?.aeskey;
   if (hex && /^[a-f0-9]{32}$/i.test(hex)) return Buffer.from(hex, "hex");
   if (!media.aes_key) return void 0;
-  return Buffer.from(media.aes_key, "base64");
+  return parseAesKey(media.aes_key);
 }
 
 // src/message-utils.ts
@@ -966,7 +1037,11 @@ var WeixinAdapter = class {
           throw new ValidationError3("weixin", `CDN download failed with status ${res.status}`);
         }
         const buf = Buffer.from(await res.arrayBuffer());
-        return aesKey && aesKey.length > 0 ? decryptAesEcb(buf, aesKey) : buf;
+        const decrypted = aesKey && aesKey.length > 0 ? decryptAesEcb(buf, aesKey) : buf;
+        if (attachment.type === "audio") {
+          return await silkToWav(decrypted) ?? decrypted;
+        }
+        return decrypted;
       }
     };
   }

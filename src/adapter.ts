@@ -26,6 +26,7 @@ import {
   uploadedToMessageItem,
   uploadBufferToWeixin,
 } from "./media.js";
+import { silkToWav } from "./silk.js";
 import {
   bodyFromItemList,
   buildMessageId,
@@ -435,7 +436,11 @@ export class WeixinAdapter implements Adapter<WeixinThreadId, WeixinMessage> {
           throw new ValidationError("weixin", `CDN download failed with status ${res.status}`);
         }
         const buf = Buffer.from(await res.arrayBuffer());
-        return aesKey && aesKey.length > 0 ? decryptAesEcb(buf, aesKey) : buf;
+        const decrypted = aesKey && aesKey.length > 0 ? decryptAesEcb(buf, aesKey) : buf;
+        if (attachment.type === "audio") {
+          return (await silkToWav(decrypted)) ?? decrypted;
+        }
+        return decrypted;
       },
     };
   }

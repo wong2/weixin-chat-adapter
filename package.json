@@ -1,6 +1,6 @@
 {
   "name": "chat-adapter-weixin",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Weixin iLink bot adapter for Chat SDK",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,6 +33,9 @@
   "dependencies": {
     "@chat-adapter/shared": "^4.31.0",
     "qrcode-terminal": "^0.12.0"
+  },
+  "optionalDependencies": {
+    "silk-wasm": "^3.7.1"
   },
   "devDependencies": {
     "@chat-adapter/state-memory": "^4.31.0",
