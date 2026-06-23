@@ -264,9 +264,10 @@ function buildCdnDownloadUrl(encryptedQueryParam, cdnBaseUrl) {
   return `${cdnBaseUrl}/download?encrypted_query_param=${encodeURIComponent(encryptedQueryParam)}`;
 }
 function uploadedToMessageItem(params) {
+  const aesKeyForKind = params.kind === "image" ? Buffer.from(params.uploaded.aeskey, "hex").toString("base64") : Buffer.from(params.uploaded.aeskey, "ascii").toString("base64");
   const media = {
     encrypt_query_param: params.uploaded.downloadEncryptedQueryParam,
-    aes_key: Buffer.from(params.uploaded.aeskey, "hex").toString("base64"),
+    aes_key: aesKeyForKind,
     encrypt_type: 1
   };
   if (params.kind === "image") {

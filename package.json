@@ -1,6 +1,6 @@
 {
   "name": "chat-adapter-weixin",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Weixin iLink bot adapter for Chat SDK",
   "type": "module",
   "main": "./dist/index.js",

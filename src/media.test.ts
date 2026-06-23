@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { attachmentFromMessageItem, encryptAesEcb, parseAesKey } from "./media.js";
+import {
+  attachmentFromMessageItem,
+  encryptAesEcb,
+  parseAesKey,
+  uploadedToMessageItem,
+} from "./media.js";
+import type { UploadedFileInfo } from "./types.js";
 import { MessageItemType } from "./types.js";
 
 describe("parseAesKey", () => {
@@ -16,6 +22,32 @@ describe("parseAesKey", () => {
 
   it("rejects keys that decode to neither 16 bytes nor 32-char hex", () => {
     expect(() => parseAesKey(Buffer.from("too-short").toString("base64"))).toThrow(/aes_key must/);
+  });
+});
+
+describe("uploadedToMessageItem aes_key encoding", () => {
+  const keyHex = "00112233445566778899aabbccddeeff";
+  const uploaded: UploadedFileInfo = {
+    filekey: "fk",
+    downloadEncryptedQueryParam: "dl-param",
+    aeskey: keyHex,
+    fileSize: 42,
+    fileSizeCiphertext: 48,
+  };
+
+  it("encodes image aes_key as base64 of the raw 16 bytes", () => {
+    const item = uploadedToMessageItem({ uploaded, kind: "image" });
+    const aesKey = item.image_item!.media.aes_key!;
+    expect(parseAesKey(aesKey)).toEqual(Buffer.from(keyHex, "hex"));
+    expect(Buffer.from(aesKey, "base64").length).toBe(16);
+  });
+
+  it("encodes file aes_key as base64 of the 32-char hex string", () => {
+    const item = uploadedToMessageItem({ uploaded, kind: "file", fileName: "doc.pdf" });
+    const aesKey = item.file_item!.media.aes_key!;
+    expect(parseAesKey(aesKey)).toEqual(Buffer.from(keyHex, "hex"));
+    // Wire format the WeChat client expects for files: base64 of the ASCII hex.
+    expect(Buffer.from(aesKey, "base64").toString("ascii")).toBe(keyHex);
   });
 });
 

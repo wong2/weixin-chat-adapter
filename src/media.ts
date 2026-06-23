@@ -168,9 +168,18 @@ export function uploadedToMessageItem(params: {
   kind: "image" | "video" | "file";
   fileName?: string;
 }): MessageItem {
+  // aes_key wire encoding is type-dependent (see parseAesKey):
+  //   - image            → base64(raw 16 bytes)
+  //   - file/voice/video → base64(32-char hex string)
+  // Using the image encoding for files yields an aes_key the WeChat client
+  // can't parse, so the file is silently dropped on the receiving side.
+  const aesKeyForKind =
+    params.kind === "image"
+      ? Buffer.from(params.uploaded.aeskey, "hex").toString("base64")
+      : Buffer.from(params.uploaded.aeskey, "ascii").toString("base64");
   const media: CDNMedia = {
     encrypt_query_param: params.uploaded.downloadEncryptedQueryParam,
-    aes_key: Buffer.from(params.uploaded.aeskey, "hex").toString("base64"),
+    aes_key: aesKeyForKind,
     encrypt_type: 1,
   };
   if (params.kind === "image") {
