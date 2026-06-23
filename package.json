@@ -23,6 +23,7 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist coverage",
+    "prepare": "tsup",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
