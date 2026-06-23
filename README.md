@@ -1,6 +1,6 @@
 # chat-adapter-weixin
 
-Weixin iLink bot adapter for Chat SDK.
+Weixin iLink bot adapter for [Chat SDK](https://chat-sdk.dev/).
 
 This package talks to Weixin's iLink bot HTTP JSON APIs directly. It uses long
 polling for inbound messages and Chat SDK's `StateAdapter` for runtime cursor,
